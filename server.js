@@ -120,6 +120,9 @@ async function getAllIncidentKeys() {
   return keys;
 }
 
+// ── GET /health ────────────────────────────────────────────────────────────────
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
 // ── GET /test-spaces ────────────────────────────────────────────────────────────
 app.get('/test-spaces', async (req, res) => {
   console.log('[test-spaces] testing Spaces connection …');
@@ -249,7 +252,10 @@ app.get('/incidents/:lga', async (req, res) => {
 });
 
 // ── Start ───────────────────────────────────────────────────────────────────────
-const PORT = parseInt(process.env.PORT || '3000', 10);
-app.listen(PORT, () => {
+const PORT   = parseInt(process.env.PORT || '3000', 10);
+const server = app.listen(PORT, () => {
   console.log(`Incident Report server → http://localhost:${PORT}`);
 });
+
+// Allow up to 5 minutes for large video uploads; prevents hanging requests
+server.setTimeout(5 * 60 * 1000);
