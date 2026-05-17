@@ -1165,12 +1165,21 @@
       return;
     }
 
+    // Count incidents per ward for the selected LGA
+    const lgaIncidents = allIncidents.filter(i => i.lga === activeFilter);
+    const wardCounts   = {};
+    lgaIncidents.forEach(i => {
+      const w = i.ward || '';
+      wardCounts[w] = (wardCounts[w] || 0) + 1;
+    });
+
     bar.style.display = 'flex';
     bar.innerHTML = [
-      `<button class="ward-btn${activeWard === 'all' ? ' active' : ''}" data-ward="all" type="button">All Wards</button>`,
-      ...wards.map(w =>
-        `<button class="ward-btn${activeWard === w ? ' active' : ''}" data-ward="${esc(w)}" type="button">${esc(w)}</button>`
-      )
+      `<button class="ward-btn${activeWard === 'all' ? ' active' : ''}" data-ward="all" type="button">All Wards (${lgaIncidents.length})</button>`,
+      ...wards.map(w => {
+        const cnt = wardCounts[w] || 0;
+        return `<button class="ward-btn${activeWard === w ? ' active' : ''}" data-ward="${esc(w)}" type="button">${esc(w)} (${cnt})</button>`;
+      })
     ].join('');
   }
 
@@ -1211,7 +1220,10 @@
   function getDisplayList() {
     let list = activeFilter === 'all' ? [...allIncidents] : allIncidents.filter(i => i.lga === activeFilter);
     if (activeWard !== 'all') list = list.filter(i => i.ward === activeWard);
-    if (searchQuery)          list = list.filter(i => (i.filename || '').toLowerCase().includes(searchQuery));
+    if (searchQuery)          list = list.filter(i =>
+      (i.filename || '').toLowerCase().includes(searchQuery) ||
+      (i.ward     || '').toLowerCase().includes(searchQuery)
+    );
 
     if (sortOrder === 'newest')   list.sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
     if (sortOrder === 'oldest')   list.sort((a, b) => new Date(a.uploaded_at) - new Date(b.uploaded_at));
@@ -1294,7 +1306,7 @@
         <div class="card-header">
           <div class="card-header-left">
             <span class="card-lga">${esc(lgaLabel(inc.lga))}</span>
-            ${ward ? `<span class="card-ward">${esc(ward)}</span>` : ''}
+            ${ward ? `<span class="card-ward">Ward: ${esc(ward)}</span>` : ''}
           </div>
           <span class="card-date">${date}</span>
         </div>

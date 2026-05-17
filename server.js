@@ -75,6 +75,13 @@ function writeFallback(incident) {
   console.log('[fallback] wrote incident to incidents.json — total records:', list.length);
 }
 
+// ── Normalize incident — backfill "ward" on records saved before ward feature ────
+function normalizeIncident(d) {
+  if (!d) return d;
+  if (d.ward === undefined) d.ward = 'Unknown Ward';
+  return d;
+}
+
 // ── multer-s3 — streams directly to Spaces, nothing touches local disk ─────────
 const upload = multer({
   storage: multerS3({
@@ -93,10 +100,9 @@ const upload = multer({
       const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
       const ward     = (req.body.ward || '').trim();
       // collapse spaces and slashes to underscores so ward never creates extra path segments
-      const safeWard = ward.replace(/[\s/\\]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
-      const key = safeWard
-        ? `incident_reports/${lga}/${safeWard}/${Date.now()}_${safeName}`
-        : `incident_reports/${lga}/${Date.now()}_${safeName}`;
+      const safeWard   = ward.replace(/[\s/\\]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+      const wardFolder = safeWard || 'no_ward';
+      const key        = `incident_reports/${lga}/${wardFolder}/${Date.now()}_${safeName}`;
       console.log('[multer-s3] destination key →', key);
       cb(null, key);
     },
@@ -177,6 +183,8 @@ app.post('/upload', (req, res) => {
     const ward = (req.body.ward || '').trim();
     const now  = new Date().toISOString();
 
+    console.log(`[upload] lga → "${lga}" | ward → "${ward || '(none — stored under no_ward)'}" | files → ${req.files.length}`);
+
     // Client-provided sizes are the authoritative source — multer-s3 can report 0
     // when AUTO_CONTENT_TYPE modifies the stream before byte-counting completes.
     let clientSizes = [];
@@ -223,21 +231,21 @@ app.post('/upload', (req, res) => {
 app.get('/incidents', async (req, res) => {
   try {
     const keys = await getAllIncidentKeys();
-    if (!keys.length) return res.json(readFallback());
+    if (!keys.length) return res.json(readFallback().map(normalizeIncident));
 
     const pipeline = redis.pipeline();
     keys.forEach((k) => pipeline.hgetall(k));
     const results = await pipeline.exec();
 
     const incidents = results
-      .map(([err, data]) => (err || !data ? null : data))
+      .map(([err, data]) => (err || !data ? null : normalizeIncident(data)))
       .filter(Boolean)
       .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
 
     res.json(incidents);
   } catch (err) {
     console.warn('[GET /incidents] Valkey unavailable, reading from incidents.json:', err.message);
-    res.json(readFallback());
+    res.json(readFallback().map(normalizeIncident));
   }
 });
 
@@ -250,21 +258,21 @@ app.get('/incidents/:lga', async (req, res) => {
 
   try {
     const keys = await getAllIncidentKeys();
-    if (!keys.length) return res.json(readFallback().filter(i => i.lga === lga));
+    if (!keys.length) return res.json(readFallback().map(normalizeIncident).filter(i => i.lga === lga));
 
     const pipeline = redis.pipeline();
     keys.forEach((k) => pipeline.hgetall(k));
     const results = await pipeline.exec();
 
     const incidents = results
-      .map(([err, data]) => (err || !data ? null : data))
+      .map(([err, data]) => (err || !data ? null : normalizeIncident(data)))
       .filter((d) => d && d.lga === lga)
       .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
 
     res.json(incidents);
   } catch (err) {
     console.warn(`[GET /incidents/${lga}] Valkey unavailable, reading from incidents.json:`, err.message);
-    res.json(readFallback().filter(i => i.lga === lga));
+    res.json(readFallback().map(normalizeIncident).filter(i => i.lga === lga));
   }
 });
 
@@ -279,7 +287,32 @@ app.get('/incidents/:lga/:ward', async (req, res) => {
 
   try {
     const keys = await getAllIncidentKeys();
-    if (!keys.length) return res.json(readFallback().filter(i => i.lga === lga && i.ward === ward));
+    if (!keys.length) return res.json(readFallback().map(normalizeIncident).filter(i => i.lga === lga && i.ward === ward));
+
+    const pipeline = redis.pipeline();
+    keys.forEach((k) => pipeline.hgetall(k));
+    const results = await pipeline.exec();
+
+    const incidents = results
+      .map(([err, data]) => (err || !data ? null : normalizeIncident(data)))
+      .filter((d) => d && d.lga === lga && d.ward === ward)
+      .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
+
+    res.json(incidents);
+  } catch (err) {
+    console.warn(`[GET /incidents/${lga}/${ward}] Valkey unavailable, reading from incidents.json:`, err.message);
+    res.json(readFallback().map(normalizeIncident).filter(i => i.lga === lga && i.ward === ward));
+  }
+});
+
+// ── GET /debug/incidents ────────────────────────────────────────────────────────
+app.get('/debug/incidents', async (req, res) => {
+  try {
+    const keys = await getAllIncidentKeys();
+    if (!keys.length) {
+      const fallback = readFallback().slice(0, 10);
+      return res.json({ source: 'fallback', total: fallback.length, incidents: fallback });
+    }
 
     const pipeline = redis.pipeline();
     keys.forEach((k) => pipeline.hgetall(k));
@@ -287,13 +320,14 @@ app.get('/incidents/:lga/:ward', async (req, res) => {
 
     const incidents = results
       .map(([err, data]) => (err || !data ? null : data))
-      .filter((d) => d && d.lga === lga && d.ward === ward)
-      .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at))
+      .slice(0, 10);
 
-    res.json(incidents);
+    res.json({ source: 'valkey', total_keys: keys.length, showing: incidents.length, incidents });
   } catch (err) {
-    console.warn(`[GET /incidents/${lga}/${ward}] Valkey unavailable, reading from incidents.json:`, err.message);
-    res.json(readFallback().filter(i => i.lga === lga && i.ward === ward));
+    const fallback = readFallback().slice(0, 10);
+    res.json({ source: 'fallback', error: err.message, total: fallback.length, incidents: fallback });
   }
 });
 
