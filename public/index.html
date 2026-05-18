@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ekiti North — Incident Report Portal</title>
+  <title>Senator Arise Situation Room Report</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -33,11 +33,8 @@
 
     /* ── Header ──────────────────────────────────────────────────────────── */
     header { background: var(--green); color: #fff; border-bottom: 4px solid var(--gold); }
-    .header-stripe {
-      background: var(--gold); text-align: center; padding: 6px 16px;
-      font-size: 0.72rem; font-family: 'Segoe UI', system-ui, sans-serif;
-      font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--green-dark);
-    }
+    /* header-stripe hidden */
+    .header-stripe { display: none; }
     .header-inner { padding: 24px 32px; display: flex; align-items: center; gap: 20px; }
     .header-crest {
       width: 60px; height: 60px; border-radius: 50%; background: var(--gold); flex-shrink: 0;
@@ -399,12 +396,14 @@
 <body>
 
 <header>
+  <!-- CHANGE 1: header-stripe hidden via CSS above -->
   <div class="header-stripe">Official Government Portal &nbsp;·&nbsp; Ekiti State, Federal Republic of Nigeria</div>
   <div class="header-inner">
     <div class="header-crest">🏛️</div>
     <div class="header-text">
-      <h1>Ekiti North Senatorial District — Incident Report Portal</h1>
-      <p>Rep Incidence &nbsp;·&nbsp; Moba &nbsp;·&nbsp; Oye &nbsp;·&nbsp; Ikole &nbsp;·&nbsp; Ido-Osi &nbsp;·&nbsp; Ilejemeje</p>
+      <!-- CHANGE 1: Title updated -->
+      <h1>Senator Arise Situation Room Report</h1>
+      <p>Moba &nbsp;·&nbsp; Oye &nbsp;·&nbsp; Ikole &nbsp;·&nbsp; Ido-Osi &nbsp;·&nbsp; Ilejemeje</p>
     </div>
   </div>
 </header>
@@ -433,10 +432,12 @@
     <div class="card">
       <!-- LGA -->
       <div class="form-row">
-        <label>Local Government Area <span class="req">*</span></label>
+        <label>Location <span class="req">*</span></label>
         <select id="lgaSelect">
-          <option value="">— Select LGA —</option>
-          <option value="Rep_Incidence">Rep Incidence</option>
+          <!-- CHANGE 3: "All LGAs" is the default top option -->
+          <option value="All_LGAs" selected>All LGAs</option>
+          <!-- CHANGE 4: Rep Incidence hidden (not removed) -->
+          <option value="Rep_Incidence" style="display:none">Rep Incidence</option>
           <option value="Moba">Moba</option>
           <option value="Oye">Oye</option>
           <option value="Ikole">Ikole</option>
@@ -445,7 +446,7 @@
         </select>
       </div>
 
-      <!-- Ward (hidden for Rep_Incidence) -->
+      <!-- Ward (hidden for All_LGAs and Rep_Incidence) -->
       <div class="form-row" id="wardRow" style="display:none">
         <label>Ward <span class="req">*</span></label>
         <select id="wardSelect" disabled>
@@ -546,10 +547,10 @@
         </select>
       </div>
 
-      <!-- LGA filters -->
+      <!-- LGA filters — CHANGE 2: Rep Incidence filter button hidden -->
       <div class="filter-bar" id="filterBar">
         <button class="filter-btn active" data-filter="all"           type="button">All LGAs <span class="filter-count" id="cnt-all"></span></button>
-        <button class="filter-btn"        data-filter="Rep_Incidence" type="button">Rep Incidence <span class="filter-count" id="cnt-Rep_Incidence"></span></button>
+        <button class="filter-btn"        data-filter="Rep_Incidence" type="button" style="display:none">Rep Incidence <span class="filter-count" id="cnt-Rep_Incidence"></span></button>
         <button class="filter-btn"        data-filter="Moba"          type="button">Moba <span class="filter-count" id="cnt-Moba"></span></button>
         <button class="filter-btn"        data-filter="Oye"           type="button">Oye <span class="filter-count" id="cnt-Oye"></span></button>
         <button class="filter-btn"        data-filter="Ikole"         type="button">Ikole <span class="filter-count" id="cnt-Ikole"></span></button>
@@ -576,13 +577,14 @@
 
 </main>
 
-<footer>Ekiti North Senatorial District Incident Report System &nbsp;·&nbsp; Ekiti State Government</footer>
+<footer>Senator Arise Situation Room &nbsp;·&nbsp; Ekiti North Senatorial District</footer>
 
 <script>
   'use strict';
 
   // ── Ward data ───────────────────────────────────────────────────────────────
   const LGA_WARDS = {
+    All_LGAs:      [],   // no ward selection needed for All LGAs
     Rep_Incidence: [],
     Ido_Osi: [
       'AYETORO I', 'AYETORO II', 'IDO I', 'IDO II',
@@ -614,7 +616,7 @@
     ]
   };
 
-  const PAGE_SIZE    = 12;
+  const PAGE_SIZE      = 12;
   const MAX_CONCURRENT = 5;
 
   // ── Upload state ────────────────────────────────────────────────────────────
@@ -659,6 +661,7 @@
   function lgaLabel(lga) {
     if (lga === 'Ido_Osi')       return 'Ido-Osi';
     if (lga === 'Rep_Incidence') return 'Rep Incidence';
+    if (lga === 'All_LGAs')      return 'All LGAs';
     return lga || '—';
   }
 
@@ -682,11 +685,12 @@
     return ['mp4','mov','avi','mkv','wmv','flv','webm','m4v','3gp','3g2','ts','mts','m2ts'].includes(ext);
   }
 
-  // ── syncBtn — disable submit if uploading or queue is active ───────────────
+  // ── syncBtn ─────────────────────────────────────────────────────────────────
   function syncBtn() {
     const lga        = document.getElementById('lgaSelect').value;
     const ward       = document.getElementById('wardSelect').value;
-    const needWard   = lga && lga !== 'Rep_Incidence';
+    // All_LGAs and Rep_Incidence don't need a ward
+    const needWard   = lga && lga !== 'Rep_Incidence' && lga !== 'All_LGAs';
     const wardOk     = !needWard || !!ward;
     const queueLive  = queue.length > 0;
     document.getElementById('uploadBtn').disabled =
@@ -702,7 +706,8 @@
     wardSelect.innerHTML = '<option value="">— Select Ward —</option>';
     wardSelect.value     = '';
 
-    if (!lga || lga === 'Rep_Incidence') {
+    // Hide ward row for All_LGAs and Rep_Incidence
+    if (!lga || lga === 'Rep_Incidence' || lga === 'All_LGAs') {
       wardRow.style.display = 'none';
       wardSelect.disabled   = true;
     } else {
@@ -956,11 +961,10 @@
       showAlert('uploadAlert',
         `✓ All <strong>${done}</strong> video${done !== 1 ? 's' : ''} uploaded successfully to <strong>${lgaLabel(queueLga)}${queueWard ? ' / ' + esc(queueWard) : ''}</strong>.`,
         'success');
-      // Reset form after short delay so user can read the success message
       setTimeout(() => {
         selectedFiles = [];
         document.getElementById('fileInput').value          = '';
-        document.getElementById('lgaSelect').value          = '';
+        document.getElementById('lgaSelect').value          = 'All_LGAs';
         document.getElementById('wardSelect').innerHTML     = '<option value="">— Select LGA first —</option>';
         document.getElementById('wardSelect').disabled      = true;
         document.getElementById('wardRow').style.display    = 'none';
@@ -987,7 +991,7 @@
     currentSpeed   = 0;
 
     document.getElementById('fileInput').value             = '';
-    document.getElementById('lgaSelect').value             = '';
+    document.getElementById('lgaSelect').value             = 'All_LGAs';
     document.getElementById('wardSelect').innerHTML        = '<option value="">— Select LGA first —</option>';
     document.getElementById('wardSelect').disabled         = true;
     document.getElementById('wardRow').style.display       = 'none';
@@ -1165,7 +1169,6 @@
       return;
     }
 
-    // Count incidents per ward for the selected LGA
     const lgaIncidents = allIncidents.filter(i => i.lga === activeFilter);
     const wardCounts   = {};
     lgaIncidents.forEach(i => {
@@ -1339,6 +1342,9 @@
     }
     setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; btn.style.borderColor = ''; }, 1600);
   });
+
+  // ── Init: enable upload button since All LGAs is pre-selected ───────────────
+  syncBtn();
 </script>
 </body>
 </html>
