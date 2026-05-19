@@ -97,26 +97,36 @@ const upload = multer({
       if (!VALID_LGAS.includes(lga)) {
         return cb(new Error(`Invalid LGA. Must be one of: ${VALID_LGAS.join(', ')}`));
       }
-      const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
+      const safeName   = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
+      const mime       = file.mimetype;
+      const typeFolder = mime.startsWith('video/') ? 'videos' : mime.startsWith('image/') ? 'images' : 'documents';
       let key;
       if (lga === 'All_LGAs') {
-        key = `incident_reports/All_LGAs/${Date.now()}_${safeName}`;
+        key = `incident_reports/All_LGAs/${typeFolder}/${Date.now()}_${safeName}`;
       } else {
         const ward     = (req.body.ward || '').trim();
         // collapse spaces and slashes to underscores so ward never creates extra path segments
         const safeWard   = ward.replace(/[\s/\\]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
         const wardFolder = safeWard || 'no_ward';
-        key = `incident_reports/${lga}/${wardFolder}/${Date.now()}_${safeName}`;
+        key = `incident_reports/${lga}/${wardFolder}/${typeFolder}/${Date.now()}_${safeName}`;
       }
       console.log('[multer-s3] destination key →', key);
       cb(null, key);
     },
   }),
   fileFilter(_req, file, cb) {
-    if (!file.mimetype.startsWith('video/')) {
-      return cb(new Error('Only video files are allowed'));
+    const mime = file.mimetype;
+    if (
+      mime.startsWith('video/') ||
+      mime === 'image/jpeg' ||
+      mime === 'image/jpg' ||
+      mime === 'image/png' ||
+      mime === 'application/pdf'
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only video, image (JPG/PNG) and PDF files are allowed'));
     }
-    cb(null, true);
   },
 });
 
@@ -205,10 +215,13 @@ app.post('/upload', (req, res) => {
 
       console.log(`[upload] file ${i + 1}/${req.files.length} complete → ${url} (${size} bytes)`);
 
+      const fileMime = file.mimetype || '';
+      const fileType = fileMime.startsWith('video/') ? 'video' : fileMime.startsWith('image/') ? 'image' : 'document';
       const meta = {
         id,
         lga,
         ward,
+        fileType,
         filename:    file.originalname,
         filepath:    url,
         uploaded_at: now,

@@ -392,6 +392,20 @@
     .hidden { display: none; }
     [data-lga="Rep_Incidence"] { display: none; }
 
+    /* ── File type badge on cards ────────────────────────────────────────── */
+    .card-type-badge {
+      font-size: 0.62rem; font-family: 'Segoe UI', system-ui, sans-serif;
+      font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 10px;
+      background: rgba(255,255,255,0.2); color: #fff; white-space: nowrap; flex-shrink: 0;
+    }
+
+    /* ── Image thumbnail on cards ────────────────────────────────────────── */
+    .card-thumb {
+      width: 100%; height: 140px; object-fit: cover; border-radius: 6px;
+      display: block; margin-bottom: 8px; background: #f0f0ec;
+    }
+
     /* ── Footer ──────────────────────────────────────────────────────────── */
     footer {
       text-align: center; padding: 20px; font-size: 0.75rem;
@@ -461,12 +475,12 @@
         <label>Video Files <span class="req">*</span></label>
         <div class="dropzone" id="dropzone">
           <input type="file" id="fileInput"
-            accept="video/*,.mp4,.mov,.avi,.mkv,.wmv,.flv,.webm,.m4v,.3gp,.ts,.mts"
+            accept="video/*,image/*,.pdf,.jpg,.jpeg,.png,.mp4,.mov,.avi,.mkv,.wmv,.flv,.webm,.m4v,.3gp,.ts,.mts"
             multiple />
-          <div class="dz-icon">🎥</div>
-          <div class="dz-main">Drag &amp; drop videos here</div>
-          <div class="dz-hint">Select up to 100 videos at once or drag and drop</div>
-          <div class="dz-limit">No file size limit — all video formats supported</div>
+          <div class="dz-icon">📁</div>
+          <div class="dz-main">Drop videos, images or PDF files here</div>
+          <div class="dz-hint">Select up to 100 files at once or drag and drop</div>
+          <div class="dz-limit">Supported files: Videos, Images (JPG/PNG) and PDF documents</div>
         </div>
         <div class="preview-list" id="previewList"></div>
       </div>
@@ -561,6 +575,14 @@
         <button class="filter-btn"        data-filter="Ilejemeje"     type="button">Ilejemeje <span class="filter-count" id="cnt-Ilejemeje"></span></button>
       </div>
 
+      <!-- File type filters -->
+      <div class="filter-bar" id="typeFilterBar">
+        <button class="filter-btn active" data-type="all"      type="button">All Types <span class="filter-count" id="cnt-type-all"></span></button>
+        <button class="filter-btn"        data-type="video"    type="button">🎬 Videos <span class="filter-count" id="cnt-type-video"></span></button>
+        <button class="filter-btn"        data-type="image"    type="button">🖼️ Images <span class="filter-count" id="cnt-type-image"></span></button>
+        <button class="filter-btn"        data-type="document" type="button">📄 Documents <span class="filter-count" id="cnt-type-document"></span></button>
+      </div>
+
       <!-- Ward filters (shown when an LGA is selected) -->
       <div class="ward-filter-bar" id="wardFilterBar"></div>
 
@@ -636,9 +658,10 @@
 
   // ── Incidents state ─────────────────────────────────────────────────────────
   let allIncidents = [];
-  let activeFilter = 'all';
-  let activeWard   = 'all';
-  let searchQuery  = '';
+  let activeFilter     = 'all';
+  let activeWard       = 'all';
+  let activeTypeFilter = 'all';
+  let searchQuery      = '';
   let sortOrder    = 'newest';
   let currentPage  = 1;
 
@@ -681,10 +704,13 @@
 
   function resetPage() { currentPage = 1; }
 
-  function isVideoFile(f) {
-    if (f.type.startsWith('video/')) return true;
-    const ext = f.name.toLowerCase().split('.').pop();
-    return ['mp4','mov','avi','mkv','wmv','flv','webm','m4v','3gp','3g2','ts','mts','m2ts'].includes(ext);
+  function getFileType(f) {
+    const mime = f.type || '';
+    const ext  = f.name.toLowerCase().split('.').pop();
+    if (mime.startsWith('video/') || ['mp4','mov','avi','mkv','wmv','flv','webm','m4v','3gp','3g2','ts','mts','m2ts'].includes(ext)) return 'video';
+    if (mime === 'application/pdf' || ext === 'pdf') return 'document';
+    if (mime.startsWith('image/') || ['jpg','jpeg','png'].includes(ext)) return 'image';
+    return null;
   }
 
   // ── syncBtn — disable submit if uploading or queue is active ───────────────
@@ -741,10 +767,10 @@
   function applyFiles(fileList) {
     let rejected = 0;
     Array.from(fileList).forEach(f => {
-      if (!isVideoFile(f)) { rejected++; return; }
+      if (!getFileType(f)) { rejected++; return; }
       if (!selectedFiles.find(x => x.name === f.name && x.size === f.size)) selectedFiles.push(f);
     });
-    if (rejected) showAlert('uploadAlert', `${rejected} file(s) skipped — not recognized as video files.`, 'error');
+    if (rejected) showAlert('uploadAlert', `${rejected} file(s) skipped — only videos, images (JPG/PNG) and PDFs are accepted.`, 'error');
     else hideAlert('uploadAlert');
     renderPreviewList();
     updateCompressionNotice();
@@ -762,13 +788,19 @@
     const el = document.getElementById('previewList');
     if (!selectedFiles.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
     el.style.display = 'flex';
-    el.innerHTML = selectedFiles.map((f, i) => `
+    el.innerHTML = selectedFiles.map((f, i) => {
+      const ft    = getFileType(f);
+      const icon  = ft === 'image' ? '🖼️' : ft === 'document' ? '📄' : '🎬';
+      const label = ft === 'image' ? 'IMAGE' : ft === 'document' ? 'DOCUMENT' : 'VIDEO';
+      return `
       <div class="preview-item">
-        <span class="preview-icon">🎬</span>
+        <span class="preview-icon">${icon}</span>
+        <span style="font-size:0.65rem;font-weight:700;color:var(--green);letter-spacing:0.08em;text-transform:uppercase;font-family:'Segoe UI',system-ui,sans-serif;flex-shrink:0">${label}</span>
         <span class="preview-name" title="${esc(f.name)}">${esc(f.name)}</span>
         <span class="preview-size">${formatSize(f.size)}</span>
         <button class="preview-remove" data-idx="${i}" type="button" title="Remove">✕</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
 
   document.getElementById('previewList').addEventListener('click', (e) => {
@@ -1146,13 +1178,23 @@
       const n = allIncidents.filter(i => i.lga === lga).length;
       span.textContent = n ? `(${n})` : '';
     });
+
+    // File type counts (from visible set only)
+    const typeAll = document.getElementById('cnt-type-all');
+    if (typeAll) typeAll.textContent = visible.length ? `(${visible.length})` : '';
+    ['video', 'image', 'document'].forEach(t => {
+      const span = document.getElementById(`cnt-type-${t}`);
+      if (!span) return;
+      const n = visible.filter(i => (i.fileType || 'video') === t).length;
+      span.textContent = n ? `(${n})` : '';
+    });
   }
 
   // ── LGA filter ──────────────────────────────────────────────────────────────
   document.getElementById('filterBar').addEventListener('click', (e) => {
     const btn = e.target.closest('.filter-btn');
     if (!btn) return;
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#filterBar .filter-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     activeFilter = btn.dataset.filter;
     activeWard   = 'all';
@@ -1199,6 +1241,16 @@
     renderCards();
   });
 
+  document.getElementById('typeFilterBar').addEventListener('click', (e) => {
+    const btn = e.target.closest('.filter-btn');
+    if (!btn) return;
+    document.querySelectorAll('#typeFilterBar .filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeTypeFilter = btn.dataset.type;
+    resetPage();
+    renderCards();
+  });
+
   // ── Search + sort ────────────────────────────────────────────────────────────
   document.getElementById('searchInput').addEventListener('input', (e) => {
     searchQuery = e.target.value.toLowerCase().trim();
@@ -1228,9 +1280,10 @@
     // Always exclude Rep_Incidence regardless of active filter
     let list = allIncidents.filter(i => i.lga !== 'Rep_Incidence' && i.lga !== 'Rep Incidence');
 
-    if (activeFilter !== 'all') list = list.filter(i => i.lga === activeFilter);
-    if (activeWard !== 'all')   list = list.filter(i => i.ward === activeWard);
-    if (searchQuery)            list = list.filter(i =>
+    if (activeFilter !== 'all')     list = list.filter(i => i.lga === activeFilter);
+    if (activeWard !== 'all')       list = list.filter(i => i.ward === activeWard);
+    if (activeTypeFilter !== 'all') list = list.filter(i => (i.fileType || 'video') === activeTypeFilter);
+    if (searchQuery)                list = list.filter(i =>
       (i.filename || '').toLowerCase().includes(searchQuery) ||
       (i.ward     || '').toLowerCase().includes(searchQuery)
     );
@@ -1303,13 +1356,43 @@
     const date     = inc.uploaded_at
       ? new Date(inc.uploaded_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
       : '—';
-    const url = inc.filepath || '';
+    const url      = inc.filepath || '';
+    const fileType = inc.fileType || 'video';
 
-    const viewBtn = url
-      ? `<a class="card-link" href="${esc(url)}" target="_blank" rel="noopener">▶ View Video</a>`
-      : `<span class="card-link" style="opacity:0.4;cursor:not-allowed">No URL</span>`;
-    const dlBtn   = url ? `<a class="card-link" href="${esc(url)}" download target="_blank" rel="noopener">⬇ Download Video</a>` : '';
+    const dlBtn   = url ? `<a class="card-link" href="${esc(url)}" download target="_blank" rel="noopener">⬇ Download</a>` : '';
     const copyBtn = url ? `<button class="card-copy copy-btn" data-url="${esc(url)}" type="button">📋 Copy Link</button>` : '';
+
+    let typeBadge, bodyContent;
+
+    if (fileType === 'image') {
+      typeBadge = '🖼️ IMAGE';
+      const thumb   = url ? `<img class="card-thumb" src="${esc(url)}" alt="${esc(filename)}" loading="lazy" />` : '';
+      const viewBtn = url
+        ? `<a class="card-link" href="${esc(url)}" target="_blank" rel="noopener">🔍 View Image</a>`
+        : `<span class="card-link" style="opacity:0.4;cursor:not-allowed">No URL</span>`;
+      bodyContent = `${thumb}
+          <div class="card-filename" title="${esc(filename)}">${esc(filename)}</div>
+          <div class="card-meta">Size: ${size}</div>
+          <div class="card-actions">${viewBtn}${dlBtn}${copyBtn}</div>`;
+    } else if (fileType === 'document') {
+      typeBadge = '📄 DOCUMENT';
+      const viewBtn = url
+        ? `<a class="card-link" href="${esc(url)}" target="_blank" rel="noopener">📖 Open Document</a>`
+        : `<span class="card-link" style="opacity:0.4;cursor:not-allowed">No URL</span>`;
+      bodyContent = `
+          <div class="card-filename" title="${esc(filename)}">${esc(filename)}</div>
+          <div class="card-meta">Size: ${size}</div>
+          <div class="card-actions">${viewBtn}${dlBtn}${copyBtn}</div>`;
+    } else {
+      typeBadge = '🎬 VIDEO';
+      const viewBtn = url
+        ? `<a class="card-link" href="${esc(url)}" target="_blank" rel="noopener">▶ View Video</a>`
+        : `<span class="card-link" style="opacity:0.4;cursor:not-allowed">No URL</span>`;
+      bodyContent = `
+          <div class="card-filename" title="${esc(filename)}">${esc(filename)}</div>
+          <div class="card-meta">Size: ${size}</div>
+          <div class="card-actions">${viewBtn}${dlBtn}${copyBtn}</div>`;
+    }
 
     return `
       <div class="incident-card" data-lga="${esc(inc.lga)}">
@@ -1318,12 +1401,12 @@
             <span class="card-lga">${esc(lgaLabel(inc.lga))}</span>
             ${ward ? `<span class="card-ward">Ward: ${esc(ward)}</span>` : ''}
           </div>
-          <span class="card-date">${date}</span>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            <span class="card-type-badge">${typeBadge}</span>
+            <span class="card-date">${date}</span>
+          </div>
         </div>
-        <div class="card-body">
-          <div class="card-filename" title="${esc(filename)}">${esc(filename)}</div>
-          <div class="card-meta">Size: ${size}</div>
-          <div class="card-actions">${viewBtn}${dlBtn}${copyBtn}</div>
+        <div class="card-body">${bodyContent}
         </div>
       </div>`;
   }
