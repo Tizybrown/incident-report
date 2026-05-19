@@ -406,6 +406,63 @@
       display: block; margin-bottom: 8px; background: #f0f0ec;
     }
 
+    /* ── View toggle ─────────────────────────────────────────────────────── */
+    .view-toggle { display: flex; gap: 8px; margin-bottom: 14px; }
+    .view-toggle-btn {
+      padding: 7px 16px; border: 1.5px solid var(--border); border-radius: 6px;
+      background: #fff; font-size: 0.82rem; font-family: 'Segoe UI', system-ui, sans-serif;
+      font-weight: 600; color: var(--muted); cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .view-toggle-btn:hover  { border-color: var(--green); color: var(--green); }
+    .view-toggle-btn.active { background: var(--green); border-color: var(--green); color: #fff; }
+
+    /* ── Scroll view rows (Netflix-style) ────────────────────────────────── */
+    .scroll-row { margin-bottom: 28px; }
+    .scroll-row-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px; padding: 0 2px;
+    }
+    .scroll-row-title {
+      font-size: 0.72rem; font-family: 'Segoe UI', system-ui, sans-serif;
+      font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--green);
+    }
+    .scroll-row-count {
+      font-size: 0.72rem; font-family: 'Segoe UI', system-ui, sans-serif;
+      color: var(--muted); font-weight: 400;
+    }
+    .scroll-row-nav { display: flex; gap: 6px; flex-shrink: 0; }
+    .scroll-nav-btn {
+      width: 30px; height: 30px; border: 1.5px solid var(--border); background: #fff;
+      border-radius: 6px; font-size: 1.1rem; cursor: pointer; display: flex;
+      align-items: center; justify-content: center; color: var(--muted); flex-shrink: 0;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .scroll-nav-btn:hover { border-color: var(--green); color: var(--green); background: var(--green-light); }
+    .scroll-row-wrap { position: relative; }
+    .scroll-row-wrap::before,
+    .scroll-row-wrap::after {
+      content: ''; position: absolute; top: 0; bottom: 12px; width: 36px; z-index: 1; pointer-events: none;
+    }
+    .scroll-row-wrap::before { left: 0;  background: linear-gradient(to right, var(--page-bg) 10%, transparent); }
+    .scroll-row-wrap::after  { right: 0; background: linear-gradient(to left,  var(--page-bg) 10%, transparent); }
+    .scroll-strip {
+      display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 10px;
+      scroll-behavior: smooth; scroll-snap-type: x mandatory;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .scroll-strip::-webkit-scrollbar       { height: 5px; }
+    .scroll-strip::-webkit-scrollbar-track { background: transparent; }
+    .scroll-strip::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .scroll-strip .incident-card { flex: 0 0 280px; width: 280px; scroll-snap-align: start; }
+    .scroll-strip .card-body     { padding: 10px 12px; }
+    .scroll-strip .card-filename { font-size: 0.8rem; }
+    .scroll-strip .card-link     { padding: 5px 10px; font-size: 0.74rem; }
+    .scroll-strip .card-copy     { padding: 5px 10px; font-size: 0.74rem; }
+    .scroll-strip .card-thumb    { height: 110px; }
+    .scroll-strip .card-meta     { margin-bottom: 8px; }
+    .scroll-strip .card-actions  { gap: 5px; }
+
     /* ── Footer ──────────────────────────────────────────────────────────── */
     footer {
       text-align: center; padding: 20px; font-size: 0.75rem;
@@ -553,7 +610,13 @@
 
     <div id="incidentsSection" style="display:none">
 
-      <div class="search-sort-row">
+      <!-- View toggle -->
+      <div class="view-toggle" id="viewToggle">
+        <button class="view-toggle-btn active" data-view="grid"   type="button">⊞ Grid View</button>
+        <button class="view-toggle-btn"        data-view="scroll" type="button">≡ Scroll View</button>
+      </div>
+
+      <div class="search-sort-row" id="searchSortRow">
         <input type="search" id="searchInput" class="search-input" placeholder="🔍  Search by filename…" />
         <select id="sortSelect" class="sort-select">
           <option value="newest">Newest First</option>
@@ -588,6 +651,7 @@
 
       <div class="showing-count" id="showingCount"></div>
       <div id="cardsContainer"></div>
+      <div id="scrollContainer" style="display:none"></div>
 
       <div class="pagination" id="pagination">
         <div class="page-controls">
@@ -640,7 +704,7 @@
     ]
   };
 
-  const PAGE_SIZE    = 12;
+  const PAGE_SIZE    = 30;
   const MAX_CONCURRENT = 5;
 
   // ── Upload state ────────────────────────────────────────────────────────────
@@ -664,6 +728,7 @@
   let searchQuery      = '';
   let sortOrder    = 'newest';
   let currentPage  = 1;
+  let viewMode     = localStorage.getItem('incidentViewMode') || 'grid';
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
   function formatSize(bytes) {
@@ -1156,7 +1221,7 @@
       updateFilterCounts();
       resetPage();
       renderWardFilterBar();
-      renderCards();
+      renderView();
     } catch (err) {
       allIncidents = [];
       document.getElementById('cardsContainer').innerHTML = `
@@ -1200,7 +1265,7 @@
     activeWard   = 'all';
     resetPage();
     renderWardFilterBar();
-    renderCards();
+    renderView();
   });
 
   // ── Ward filter bar ─────────────────────────────────────────────────────────
@@ -1238,7 +1303,7 @@
     activeWard = btn.dataset.ward;
     resetPage();
     renderWardFilterBar();
-    renderCards();
+    renderView();
   });
 
   document.getElementById('typeFilterBar').addEventListener('click', (e) => {
@@ -1248,18 +1313,18 @@
     btn.classList.add('active');
     activeTypeFilter = btn.dataset.type;
     resetPage();
-    renderCards();
+    renderView();
   });
 
   // ── Search + sort ────────────────────────────────────────────────────────────
   document.getElementById('searchInput').addEventListener('input', (e) => {
     searchQuery = e.target.value.toLowerCase().trim();
-    resetPage(); renderCards();
+    resetPage(); renderView();
   });
 
   document.getElementById('sortSelect').addEventListener('change', (e) => {
     sortOrder = e.target.value;
-    resetPage(); renderCards();
+    resetPage(); renderView();
   });
 
   // ── Pagination controls ──────────────────────────────────────────────────────
@@ -1432,6 +1497,123 @@
     }
     setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; btn.style.borderColor = ''; }, 1600);
   });
+
+  // ── renderView — routes to grid or scroll based on viewMode ─────────────────
+  function renderView() {
+    if (viewMode === 'scroll') {
+      document.getElementById('searchSortRow').style.display  = 'none';
+      document.getElementById('cardsContainer').style.display = 'none';
+      document.getElementById('showingCount').style.display   = 'none';
+      document.getElementById('pagination').style.display     = 'none';
+      document.getElementById('scrollContainer').style.display = 'block';
+      renderScrollView();
+    } else {
+      document.getElementById('searchSortRow').style.display  = '';
+      document.getElementById('cardsContainer').style.display = '';
+      document.getElementById('showingCount').style.display   = '';
+      document.getElementById('scrollContainer').style.display = 'none';
+      renderCards();
+    }
+  }
+
+  // ── renderScrollView — Netflix-style horizontal rows per LGA ─────────────────
+  const SCROLL_LGA_ORDER = ['All_LGAs', 'Moba', 'Oye', 'Ikole', 'Ido_Osi', 'Ilejemeje'];
+
+  function renderScrollView() {
+    const baseList = allIncidents.filter(i => i.lga !== 'Rep_Incidence' && i.lga !== 'Rep Incidence');
+
+    function applyFilters(list) {
+      if (activeWard       !== 'all') list = list.filter(i => i.ward === activeWard);
+      if (activeTypeFilter !== 'all') list = list.filter(i => (i.fileType || 'video') === activeTypeFilter);
+      return list;
+    }
+
+    const container = document.getElementById('scrollContainer');
+    const rows = [];
+
+    for (const lga of SCROLL_LGA_ORDER) {
+      let lgaList = baseList.filter(i => i.lga === lga);
+      if (activeFilter !== 'all' && activeFilter !== lga) continue;
+      lgaList = applyFilters(lgaList);
+      lgaList.sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
+      if (!lgaList.length) continue;
+
+      const label = lgaLabel(lga);
+      const cards = lgaList.map(cardHTML).join('');
+      rows.push(`
+        <div class="scroll-row">
+          <div class="scroll-row-header">
+            <div>
+              <span class="scroll-row-title">${esc(label)}</span>
+              <span class="scroll-row-count">&nbsp;(${lgaList.length})</span>
+            </div>
+            <div class="scroll-row-nav">
+              <button class="scroll-nav-btn" data-scroll-lga="${esc(lga)}" data-dir="-1" type="button">‹</button>
+              <button class="scroll-nav-btn" data-scroll-lga="${esc(lga)}" data-dir="1"  type="button">›</button>
+            </div>
+          </div>
+          <div class="scroll-row-wrap">
+            <div class="scroll-strip" id="strip-${esc(lga)}">${cards}</div>
+          </div>
+        </div>`);
+    }
+
+    if (!rows.length) {
+      container.innerHTML = '<div class="empty-state"><div class="ei">📂</div><p>No incident reports found.</p></div>';
+    } else {
+      container.innerHTML = rows.join('');
+    }
+  }
+
+  // ── Scroll navigation (arrow buttons in scroll view) ─────────────────────────
+  document.getElementById('scrollContainer').addEventListener('click', async (e) => {
+    // Copy-link inside scroll view
+    const copyBtn = e.target.closest('.copy-btn');
+    if (copyBtn) {
+      const url  = copyBtn.dataset.url;
+      const orig = copyBtn.innerHTML;
+      try {
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(url);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = url; ta.style.cssText = 'position:fixed;opacity:0';
+          document.body.appendChild(ta); ta.select();
+          document.execCommand('copy'); document.body.removeChild(ta);
+        }
+        copyBtn.innerHTML = '✓ Copied!'; copyBtn.style.color = 'var(--green)'; copyBtn.style.borderColor = 'var(--green)';
+      } catch {
+        copyBtn.innerHTML = '✗ Failed'; copyBtn.style.color = 'var(--red)';
+      }
+      setTimeout(() => { copyBtn.innerHTML = orig; copyBtn.style.color = ''; copyBtn.style.borderColor = ''; }, 1600);
+      return;
+    }
+
+    // Scroll strip navigation arrows
+    const navBtn = e.target.closest('.scroll-nav-btn');
+    if (!navBtn) return;
+    const lga  = navBtn.dataset.scrollLga;
+    const dir  = parseInt(navBtn.dataset.dir, 10);
+    const strip = document.getElementById(`strip-${lga}`);
+    if (strip) strip.scrollBy({ left: dir * 300, behavior: 'smooth' });
+  });
+
+  // ── View toggle handler ───────────────────────────────────────────────────────
+  document.getElementById('viewToggle').addEventListener('click', (e) => {
+    const btn = e.target.closest('.view-toggle-btn');
+    if (!btn) return;
+    const newMode = btn.dataset.view;
+    if (newMode === viewMode) return;
+    viewMode = newMode;
+    localStorage.setItem('incidentViewMode', viewMode);
+    document.querySelectorAll('.view-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.view === viewMode));
+    renderView();
+  });
+
+  // ── Init: apply saved view mode on load ──────────────────────────────────────
+  ;(function initViewMode() {
+    document.querySelectorAll('.view-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.view === viewMode));
+  })();
 </script>
 </body>
 </html>
