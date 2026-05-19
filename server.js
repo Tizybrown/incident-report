@@ -27,6 +27,14 @@ app.use(express.static('public'));
 const VALID_LGAS    = ['All_LGAs', 'Rep_Incidence', 'Moba', 'Oye', 'Ikole', 'Ido_Osi', 'Ilejemeje'];
 const FALLBACK_FILE = path.join(__dirname, 'incidents.json');
 
+// Extensions accepted regardless of MIME type (covers AVI ambiguity on Windows)
+const ALLOWED_VIDEO_EXTS = new Set([
+  '.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv',
+  '.webm', '.m4v', '.3gp', '.3g2', '.ts', '.mts', '.m2ts',
+]);
+const ALLOWED_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png']);
+const ALLOWED_DOC_EXTS   = new Set(['.pdf']);
+
 // ── DigitalOcean Spaces (S3-compatible) ────────────────────────────────────────
 const s3 = new S3Client({
   endpoint:         process.env.DO_SPACES_ENDPOINT,
@@ -82,24 +90,45 @@ function normalizeIncident(d) {
   return d;
 }
 
+// ── Resolve the canonical file type from MIME + extension ─────────────────────
+// Returns 'video' | 'image' | 'document' | null
+function resolveFileType(mime, originalname) {
+  const ext = path.extname(originalname).toLowerCase();
+  if (
+    mime.startsWith('video/') ||
+    mime === 'application/octet-stream' ||
+    mime === 'application/x-troff-msvideo' ||
+    ALLOWED_VIDEO_EXTS.has(ext)
+  ) return 'video';
+  if (mime.startsWith('image/') || ALLOWED_IMAGE_EXTS.has(ext)) return 'image';
+  if (mime === 'application/pdf' || ALLOWED_DOC_EXTS.has(ext)) return 'document';
+  return null;
+}
+
 // ── multer-s3 — streams directly to Spaces, nothing touches local disk ─────────
 const upload = multer({
   storage: multerS3({
     s3,
     bucket:      process.env.DO_SPACES_BUCKET,
     acl:         'public-read',
-    contentType: multerS3.AUTO_CONTENT_TYPE,
-    partSize:    10 * 1024 * 1024,  // 10 MB per multipart part
-    queueSize:   10,                 // 10 concurrent parts per file
+    // AVI files may arrive as application/octet-stream on Windows; force correct
+    // Content-Type so the object is playable when downloaded from Spaces.
+    contentType(req, file, cb) {
+      const ext = path.extname(file.originalname).toLowerCase();
+      if (ext === '.avi') return cb(null, 'video/x-msvideo');
+      multerS3.AUTO_CONTENT_TYPE(req, file, cb);
+    },
+    partSize:  10 * 1024 * 1024,  // 10 MB per multipart part
+    queueSize: 10,                  // 10 concurrent parts per file
     key(req, file, cb) {
-      console.log('[multer-s3] streaming file to Spaces →', file.originalname);
+      console.log('[multer-s3] streaming file to Spaces →', file.originalname, '| mime:', file.mimetype);
       const lga = req.body.lga;
       if (!VALID_LGAS.includes(lga)) {
         return cb(new Error(`Invalid LGA. Must be one of: ${VALID_LGAS.join(', ')}`));
       }
       const safeName   = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
-      const mime       = file.mimetype;
-      const typeFolder = mime.startsWith('video/') ? 'videos' : mime.startsWith('image/') ? 'images' : 'documents';
+      const fileType   = resolveFileType(file.mimetype, file.originalname);
+      const typeFolder = fileType === 'video' ? 'videos' : fileType === 'image' ? 'images' : 'documents';
       let key;
       if (lga === 'All_LGAs') {
         key = `incident_reports/All_LGAs/${typeFolder}/${Date.now()}_${safeName}`;
@@ -115,17 +144,13 @@ const upload = multer({
     },
   }),
   fileFilter(_req, file, cb) {
-    const mime = file.mimetype;
-    if (
-      mime.startsWith('video/') ||
-      mime === 'image/jpeg' ||
-      mime === 'image/jpg' ||
-      mime === 'image/png' ||
-      mime === 'application/pdf'
-    ) {
+    const type = resolveFileType(file.mimetype, file.originalname);
+    if (type) {
+      console.log(`[fileFilter] accepted — "${file.originalname}" (mime: ${file.mimetype}, type: ${type})`);
       cb(null, true);
     } else {
-      cb(new Error('Only video, image (JPG/PNG) and PDF files are allowed'));
+      console.warn(`[fileFilter] rejected — "${file.originalname}" (mime: ${file.mimetype})`);
+      cb(new Error(`File type not allowed: ${file.mimetype} / ${path.extname(file.originalname) || 'no ext'}`));
     }
   },
 });
@@ -184,14 +209,29 @@ app.get('/test-spaces', async (req, res) => {
 app.post('/upload', (req, res) => {
   console.log('[upload] request received — starting batch upload');
 
+  // Safety net: if the handler somehow never sends a response, force one after 10 min
+  const responseTimeout = setTimeout(() => {
+    if (!res.headersSent) {
+      console.error('[upload] response timeout — forcing error response');
+      res.status(500).json({ success: false, error: 'Server took too long to respond' });
+    }
+  }, 10 * 60 * 1000);
+
   upload.array('videos', 100)(req, res, async (err) => {
     if (err) {
-      console.error('[upload] multer/Spaces error:', err.message);
+      clearTimeout(responseTimeout);
+      if (err instanceof multer.MulterError) {
+        console.error('[upload] MulterError:', err.field, err.message);
+        return res.status(400).json({ success: false, error: `Upload error: ${err.message}` });
+      }
+      console.error('[upload] multer/Spaces error:', err.message, err.stack || '');
       return res.status(400).json({ success: false, error: err.message });
     }
+
     if (!req.files || req.files.length === 0) {
+      clearTimeout(responseTimeout);
       console.error('[upload] no files in request');
-      return res.status(400).json({ success: false, error: 'No video files received' });
+      return res.status(400).json({ success: false, error: 'No files received' });
     }
 
     const lga  = req.body.lga;
@@ -207,39 +247,49 @@ app.post('/upload', (req, res) => {
 
     const results = [];
 
-    for (let i = 0; i < req.files.length; i++) {
-      const file = req.files[i];
-      const url  = spacesUrl(file.key);
-      const id   = uuidv4();
-      const size = (file.size > 0) ? file.size : (clientSizes[i] || 0);
+    try {
+      for (let i = 0; i < req.files.length; i++) {
+        const file     = req.files[i];
+        const url      = spacesUrl(file.key);
+        const id       = uuidv4();
+        const size     = (file.size > 0) ? file.size : (clientSizes[i] || 0);
+        const fileMime = file.mimetype || '';
+        const fileType = resolveFileType(fileMime, file.originalname);
 
-      console.log(`[upload] file ${i + 1}/${req.files.length} complete → ${url} (${size} bytes)`);
+        console.log(`[upload] file ${i + 1}/${req.files.length} complete → ${url} (${size} bytes, type: ${fileType})`);
 
-      const fileMime = file.mimetype || '';
-      const fileType = fileMime.startsWith('video/') ? 'video' : fileMime.startsWith('image/') ? 'image' : 'document';
-      const meta = {
-        id,
-        lga,
-        ward,
-        fileType,
-        filename:    file.originalname,
-        filepath:    url,
-        uploaded_at: now,
-        file_size:   String(size),
-      };
+        const meta = {
+          id,
+          lga,
+          ward,
+          fileType: fileType || 'video',
+          filename:    file.originalname,
+          filepath:    url,
+          uploaded_at: now,
+          file_size:   String(size),
+        };
 
-      console.log(`[upload] saving to Valkey — incident:${id}`);
-      try {
-        await redis.hset(`incident:${id}`, meta);
-        console.log(`[upload] Valkey save successful — ${file.originalname}`);
-      } catch (dbErr) {
-        console.error(`[upload] Valkey unavailable for ${file.originalname}, writing to incidents.json:`, dbErr.message);
-        writeFallback(meta);
+        console.log(`[upload] saving to Valkey — incident:${id}`);
+        try {
+          await redis.hset(`incident:${id}`, meta);
+          console.log(`[upload] Valkey save successful — ${file.originalname}`);
+        } catch (dbErr) {
+          console.error(`[upload] Valkey unavailable for ${file.originalname}, writing to incidents.json:`, dbErr.message);
+          writeFallback(meta);
+        }
+
+        results.push({ success: true, url, filename: file.originalname, size });
       }
-
-      results.push({ success: true, url, filename: file.originalname, size });
+    } catch (processingErr) {
+      clearTimeout(responseTimeout);
+      console.error('[upload] error processing uploaded files:', processingErr.message, processingErr.stack || '');
+      if (!res.headersSent) {
+        return res.status(500).json({ success: false, error: processingErr.message });
+      }
+      return;
     }
 
+    clearTimeout(responseTimeout);
     console.log(`[upload] batch complete — ${results.length} file(s) processed, sending response`);
     res.json({ success: true, uploaded: results.length, results });
   });
@@ -349,11 +399,23 @@ app.get('/debug/incidents', async (req, res) => {
   }
 });
 
+// ── Global error handler (catches anything Express itself throws) ───────────────
+app.use((err, req, res, _next) => {
+  console.error('[express] unhandled error:', err.message, err.stack || '');
+  if (!res.headersSent) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── Start ───────────────────────────────────────────────────────────────────────
 const PORT   = parseInt(process.env.PORT || '3000', 10);
 const server = app.listen(PORT, () => {
   console.log(`Incident Report server → http://localhost:${PORT}`);
 });
 
-// 6-hour timeout to accommodate very large video uploads
-server.setTimeout(6 * 60 * 60 * 1000);
+// 6-hour timeouts to accommodate very large video uploads
+const SIX_HOURS = 6 * 60 * 60 * 1000;
+server.setTimeout(SIX_HOURS);
+server.timeout          = SIX_HOURS;
+server.keepAliveTimeout = SIX_HOURS;
+server.headersTimeout   = SIX_HOURS + 1000;  // must be > keepAliveTimeout
