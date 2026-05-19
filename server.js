@@ -24,7 +24,7 @@ app.use((req, res, next) => {
 app.use(express.static('public'));
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const VALID_LGAS    = ['Rep_Incidence', 'Moba', 'Oye', 'Ikole', 'Ido_Osi', 'Ilejemeje'];
+const VALID_LGAS    = ['All_LGAs', 'Rep_Incidence', 'Moba', 'Oye', 'Ikole', 'Ido_Osi', 'Ilejemeje'];
 const FALLBACK_FILE = path.join(__dirname, 'incidents.json');
 
 // ── DigitalOcean Spaces (S3-compatible) ────────────────────────────────────────
@@ -98,11 +98,16 @@ const upload = multer({
         return cb(new Error(`Invalid LGA. Must be one of: ${VALID_LGAS.join(', ')}`));
       }
       const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
-      const ward     = (req.body.ward || '').trim();
-      // collapse spaces and slashes to underscores so ward never creates extra path segments
-      const safeWard   = ward.replace(/[\s/\\]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
-      const wardFolder = safeWard || 'no_ward';
-      const key        = `incident_reports/${lga}/${wardFolder}/${Date.now()}_${safeName}`;
+      let key;
+      if (lga === 'All_LGAs') {
+        key = `incident_reports/All_LGAs/${Date.now()}_${safeName}`;
+      } else {
+        const ward     = (req.body.ward || '').trim();
+        // collapse spaces and slashes to underscores so ward never creates extra path segments
+        const safeWard   = ward.replace(/[\s/\\]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+        const wardFolder = safeWard || 'no_ward';
+        key = `incident_reports/${lga}/${wardFolder}/${Date.now()}_${safeName}`;
+      }
       console.log('[multer-s3] destination key →', key);
       cb(null, key);
     },
